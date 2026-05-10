@@ -25,33 +25,33 @@ EXISTING_PASSWD=$(grep -E '^rpcpassword=' "$GRC_DATADIR/gridcoinresearch.conf" |
 
 if [[ -n "$EXISTING_USER" ]]; then
   GRC_USERNAME="$EXISTING_USER"
-  echo "[INIT]   GRC_USERNAME=$GRC_USERNAME (from conf)"
+  echo "[INIT]   GRC_USERNAME=******** (from conf)"
 elif [[ -n "$GRC_USERNAME" ]]; then
-  echo "[INIT]   GRC_USERNAME=$GRC_USERNAME (from env)"
+  echo "[INIT]   GRC_USERNAME=******** (from env)"
 else
   GRC_USERNAME=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
-  echo "[INIT]   GRC_USERNAME=$GRC_USERNAME (newly generated)"
+  echo "[INIT]   GRC_USERNAME=******** (newly generated)"
 fi
 export GRC_USERNAME
 
 if [[ -n "$EXISTING_PASSWD" ]]; then
   GRC_PASSWD="$EXISTING_PASSWD"
-  echo "[INIT]   GRC_PASSWD=$GRC_PASSWD (from conf)"
+  echo "[INIT]   GRC_PASSWD=******** (from conf)"
 elif [[ -n "$GRC_PASSWD" ]]; then
-  echo "[INIT]   GRC_PASSWD=$GRC_PASSWD (from env)"
+  echo "[INIT]   GRC_PASSWD=******** (from env)"
 else
   GRC_PASSWD=$(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 32)
-  echo "[INIT]   GRC_PASSWD=$GRC_PASSWD (newly generated)"
+  echo "[INIT]   GRC_PASSWD=******** (newly generated)"
 fi
 export GRC_PASSWD
 
 if [[ -z $(grep "rpcuser" $GRC_DATADIR/gridcoinresearch.conf) ]] ; then
-  echo "[INIT]   SET:rpcuser=$GRC_USERNAME"
-  echo "rpcuser=$GRC_USERNAME" | tee -a $GRC_DATADIR/gridcoinresearch.conf
+  echo "[INIT]   SET:rpcuser=********"
+  echo "rpcuser=$GRC_USERNAME" >> $GRC_DATADIR/gridcoinresearch.conf
 fi
 if [[ -z $(grep "rpcpassword" $GRC_DATADIR/gridcoinresearch.conf) ]] ; then
-  echo "[INIT]   SET:rpcpassword=$GRC_PASSWD"
-  echo "rpcpassword=$GRC_PASSWD" | tee -a $GRC_DATADIR/gridcoinresearch.conf
+  echo "[INIT]   SET:rpcpassword=********"
+  echo "rpcpassword=$GRC_PASSWD" >> $GRC_DATADIR/gridcoinresearch.conf
 fi
 if [[ -z $(grep "rpcport" $GRC_DATADIR/gridcoinresearch.conf) ]] ; then
   echo "[INIT]   SET:rpcport=47813"
