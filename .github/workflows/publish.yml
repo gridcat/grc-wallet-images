@@ -1,0 +1,175 @@
+name: Build & publish wallet images
+
+# Builds gridcoinresearchd-based wallet container images and mirrors
+# them to BOTH ghcr.io and Docker Hub. Each image bundles the latest
+# published gridcoinresearch-tui release; the Dockerfile's
+# `ADD .../releases/latest` cache-buster guarantees a new TUI tag
+# invalidates the layer.
+#
+# Mainnet and testnet ship on independent version timelines. Push
+# `mainnet-v0.2.0` to bump only mainnet; `testnet-v0.5.3` to bump only
+# testnet. Bumping both at once is two tag pushes — minor friction in
+# exchange for the testnet daemon pin not forcing a no-op mainnet
+# rebuild every time the testnet PPA cuts a new version.
+#
+# Triggers:
+#   - push tag `mainnet-v*` → build mainnet only, publish `:<vX.Y.Z>`
+#                             and `:latest` to both registries, sync
+#                             this README to the Docker Hub repo
+#                             description, and stamp the published
+#                             manifest digest on the Gridcoin chain.
+#                             Testnet job is skipped.
+#   - push tag `testnet-v*` → same shape, testnet flavour only
+#                             (`:<vX.Y.Z>-testnet` + `:latest-testnet`).
+#                             Mainnet job is skipped.
+#   - weekly schedule → republish BOTH `:latest` flavours so a new
+#                       TUI / PPA release flows in without an explicit
+#                       tag. No stamp, no README re-sync.
+#   - workflow_dispatch (manual) → same as weekly. Use this from the
+#                       Actions tab (Run workflow) when a new TUI release
+#                       lands and you don't want to wait for Sunday.
+#
+# Secrets the repo must have:
+#   - DOCKERHUB_USERNAME — Docker Hub login (gridcat).
+#   - DOCKERHUB_TOKEN    — Docker Hub PAT with read/write/delete
+#                          on gridcat/grc-wallet.
+# GHCR auth uses GITHUB_TOKEN automatically — no separate setup.
+
+on:
+  push:
+    tags:
+      - 'mainnet-v*'
+      - 'testnet-v*'
+  schedule:
+    # Sundays 03:00 UTC. Picks up new TUI/PPA without a manual tag.
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build_mainnet:
+    name: Build & publish mainnet
+    runs-on: ubuntu-latest
+    # Skip on tag pushes that don't target mainnet. Schedule and manual
+    # runs (event_name != 'push') always rebuild both flavours.
+    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/mainnet-v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: |
+            ghcr.io/gridcat/grc-wallet
+            gridcat/grc-wallet
+          # type=match strips the `mainnet-` prefix so the published
+          # tag is `:vX.Y.Z`, not `:mainnet-vX.Y.Z`. The raw `:latest`
+          # always applies (tag push, schedule, and manual all want
+          # `:latest` to track the most recent build).
+          tags: |
+            type=match,pattern=mainnet-(v.*),group=1
+            type=raw,value=latest
+
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: ./mainnet
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Stamp mainnet image digest on Gridcoin
+        if: startsWith(github.ref, 'refs/tags/mainnet-v')
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          HASH="${DIGEST#sha256:}"
+          echo "Stamping mainnet image @ $DIGEST"
+          curl -fsS -X POST https://stamp.gridcoin.club/api/stamps \
+            -H 'Content-Type: application/json' \
+            -d "{\"data\":{\"type\":\"stamps\",\"attributes\":{\"hash\":\"${HASH}\",\"hashType\":\"sha256\"}}}" \
+            || echo "stamp POST failed (non-fatal)"
+
+      # Sync this README + short description to the Docker Hub
+      # repository page. Only on mainnet tag push — the README is
+      # network-agnostic, so a single sync covers both flavours, and
+      # gating on mainnet-v* keeps weekly :latest republishes from
+      # touching the Hub description.
+      - name: Sync README to Docker Hub
+        if: startsWith(github.ref, 'refs/tags/mainnet-v')
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: gridcat/grc-wallet
+          short-description: "Gridcoin wallet daemon (mainnet + testnet) with bundled gridcoinresearch-tui. Built and stamped on-chain by gridcoin.club."
+          readme-filepath: ./README.md
+
+  build_testnet:
+    name: Build & publish testnet
+    runs-on: ubuntu-latest
+    if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/testnet-v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: |
+            ghcr.io/gridcat/grc-wallet
+            gridcat/grc-wallet
+          # Suffix the testnet flavour. With `onlatest=true` the suffix
+          # is also applied to `:latest`, so the published tags become
+          # `:<vX.Y.Z>-testnet` and `:latest-testnet`. type=match strips
+          # the `testnet-` prefix from the source tag the same way
+          # mainnet does.
+          flavor: |
+            suffix=-testnet,onlatest=true
+          tags: |
+            type=match,pattern=testnet-(v.*),group=1
+            type=raw,value=latest
+
+      - uses: docker/build-push-action@v6
+        id: build
+        with:
+          context: ./testnet
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Stamp testnet image digest on Gridcoin
+        if: startsWith(github.ref, 'refs/tags/testnet-v')
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          HASH="${DIGEST#sha256:}"
+          echo "Stamping testnet image @ $DIGEST"
+          curl -fsS -X POST https://stamp.gridcoin.club/api/stamps \
+            -H 'Content-Type: application/json' \
+            -d "{\"data\":{\"type\":\"stamps\",\"attributes\":{\"hash\":\"${HASH}\",\"hashType\":\"sha256\"}}}" \
+            || echo "stamp POST failed (non-fatal)"
