@@ -12,7 +12,7 @@ RUN apt-get update -qq \
     &&  add-apt-repository -y ppa:gridcoin/gridcoin-testnet \
     &&  apt-get update -qq \
     &&  apt-get install --no-install-recommends -y -qq \
-          gridcointestnetd=5.5.0.1-212~ubuntu24.04.1 \
+          gridcointestnetd=5.5.1.1-213~ubuntu24.04.1 \
     &&  apt-get clean -qq \
     &&  rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
