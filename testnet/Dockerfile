@@ -12,7 +12,7 @@ RUN apt-get update -qq \
     &&  add-apt-repository -y ppa:gridcoin/gridcoin-testnet \
     &&  apt-get update -qq \
     &&  apt-get install --no-install-recommends -y -qq \
-          gridcointestnetd=5.5.1.3-1~noble1 \
+          gridcointestnetd= 5.5.1.7-1~noble1 \
     &&  apt-get clean -qq \
     &&  rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
@@ -20,7 +20,7 @@ WORKDIR /root
 COPY entrypoint.sh /
 
 RUN mkdir -p /root/.GridcoinResearch \
-    &&  wget -O /root/nodes.txt https://addnodes.cycy.me/testnet
+    &&  wget -O /root/nodes.txt https://addnodes.gridcoin.club/testnet
 
 # Always pull the latest gridcoinresearch-tui release. See the mainnet
 # Dockerfile for the cache-buster rationale.

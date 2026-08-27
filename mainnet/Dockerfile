@@ -20,7 +20,7 @@ WORKDIR /root
 COPY entrypoint.sh /
 
 RUN mkdir -p /root/.GridcoinResearch \
-    &&  wget -O /root/nodes.txt https://addnodes.cycy.me
+    &&  wget -O /root/nodes.txt https://addnodes.gridcoin.club/
 
 # Always pull the latest gridcoinresearch-tui release.
 #
