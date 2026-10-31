@@ -1,0 +1,132 @@
+name: Release new daemon versions
+
+# Compares each Dockerfile's daemon pin with the newest version on the
+# Gridcoin PPA (Launchpad API). On a new version: commits the bumped
+# pin to master, tags `<network>-v<version>` and dispatches
+# publish.yml on that tag, which builds, publishes and stamps it.
+#
+# The dispatch is explicit because a tag pushed with GITHUB_TOKEN
+# doesn't trigger publish.yml's push event.
+
+on:
+  schedule:
+    # Daily, 04:17 UTC. Run it from the Actions tab to check now.
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  check:
+    name: Check ${{ matrix.network }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # One at a time: both jobs push to master.
+      max-parallel: 1
+      matrix:
+        include:
+          - network: mainnet
+            ppa: gridcoin-stable
+            package: gridcoinresearchd
+          - network: testnet
+            ppa: gridcoin-testnet
+            package: gridcointestnetd
+    steps:
+      # Branch head, not the triggering sha, so the second job sees the
+      # first job's commit. Full history for the re-publish check.
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Compare pin with the PPA
+        id: cmp
+        env:
+          DOCKERFILE: ${{ matrix.network }}/Dockerfile
+          PPA: ${{ matrix.ppa }}
+          PACKAGE: ${{ matrix.package }}
+        run: |
+          current=$(grep -oP '^ARG GRC_DAEMON_VERSION=\K\S+' "$DOCKERFILE")
+          latest=$(curl -fsS "https://api.launchpad.net/1.0/~gridcoin/+archive/ubuntu/${PPA}?ws.op=getPublishedBinaries&binary_name=${PACKAGE}&exact_match=true&status=Published&distro_arch_series=https://api.launchpad.net/1.0/ubuntu/noble/amd64" \
+            | jq -r '.entries | sort_by(.date_published) | last | .binary_package_version // empty')
+          if [ -z "$current" ] || [ -z "$latest" ]; then
+            echo "error: could not read versions (pin='$current', ppa='$latest')"
+            exit 1
+          fi
+          echo "pin: $current, ppa: $latest"
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          if [ "$current" != "$latest" ]; then
+            echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit, tag and publish
+        if: steps.cmp.outputs.latest != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LATEST: ${{ steps.cmp.outputs.latest }}
+          PACKAGE: ${{ matrix.package }}
+          NETWORK: ${{ matrix.network }}
+          DOCKERFILE: ${{ matrix.network }}/Dockerfile
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          # Git tags can't contain `~`: drop the Ubuntu build suffix. A
+          # PPA rebuild (only the suffix changed) gets -r2, -r3, ...
+          base="${NETWORK}-v${LATEST%%~*}"
+          tag="$base"; n=2
+          while git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; do
+            tag="$base-r$n"; n=$((n + 1))
+          done
+          sed -i "s/^ARG GRC_DAEMON_VERSION=.*/ARG GRC_DAEMON_VERSION=${LATEST}/" "$DOCKERFILE"
+          git commit -m "fix: bump $PACKAGE to $LATEST" -- "$DOCKERFILE"
+          git tag "$tag"
+          # Atomic: the bump commit and its tag land together or not at all.
+          git push --atomic origin HEAD:master "refs/tags/$tag"
+          dispatched=false
+          for i in 1 2 3; do
+            if gh workflow run publish.yml --ref "$tag"; then dispatched=true; break; fi
+            sleep $((i * 20))
+          done
+          if [ "$dispatched" != true ]; then
+            echo "error: pushed $tag but could not dispatch publish.yml; the next run retries"
+            exit 1
+          fi
+          echo "Released $tag ($PACKAGE $LATEST)" >> "$GITHUB_STEP_SUMMARY"
+
+      # Re-dispatches release tags whose versioned image is missing on
+      # either registry (publish failed, never ran, or was cancelled in
+      # the queue). Checks the five newest tags, skipping tags older
+      # than this workflow (their Dockerfile has no GRC_DAEMON_VERSION ARG).
+      - name: Re-publish release tags with missing images
+        if: steps.cmp.outputs.latest == ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NETWORK: ${{ matrix.network }}
+          DOCKERFILE: ${{ matrix.network }}/Dockerfile
+        run: |
+          for tag in $(git tag --list "${NETWORK}-v*" --sort=-creatordate | head -n 5); do
+            git show "$tag:$DOCKERFILE" 2>/dev/null | grep -q '^ARG GRC_DAEMON_VERSION=' || continue
+            ref="${tag#"${NETWORK}"-}"
+            [ "$NETWORK" = testnet ] && ref="$ref-testnet"
+            missing=""
+            for image in "ghcr.io/gridcat/grc-wallet:$ref" "docker.io/gridcat/grc-wallet:$ref"; do
+              docker manifest inspect "$image" >/dev/null 2>&1 || missing="$missing $image"
+            done
+            if [ -z "$missing" ]; then
+              echo "$tag: published on both registries"
+              continue
+            fi
+            active=$(gh run list --workflow publish.yml --branch "$tag" --json status --jq '[.[] | select(.status != "completed")] | length')
+            if [ "$active" != 0 ]; then
+              echo "$tag: publish still running"
+              continue
+            fi
+            echo "$tag: missing$missing; dispatching publish.yml"
+            gh workflow run publish.yml --ref "$tag"
+            echo "Re-dispatched $tag (missing:$missing)" >> "$GITHUB_STEP_SUMMARY"
+          done

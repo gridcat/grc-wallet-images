@@ -16,10 +16,32 @@ identical.
 | GitHub Container Registry | `ghcr.io/gridcat/grc-wallet:latest` | `ghcr.io/gridcat/grc-wallet:latest-testnet` |
 | Docker Hub | `gridcat/grc-wallet:latest` | `gridcat/grc-wallet:latest-testnet` |
 
-Versioned image tags (`:vX.Y.Z`, `:vX.Y.Z-testnet`) follow git tags
-on this repo. Mainnet and testnet ship on independent version
-timelines — the source git tags carry a network prefix (`mainnet-v*` /
-`testnet-v*`); the prefix is stripped before publishing.
+Versioned image tags (`:vX.Y.Z`, `:vX.Y.Z-testnet`) follow the git
+tags on this repo, and the git tags follow the daemon version:
+`mainnet-v5.5.1.0-83` publishes `:v5.5.1.0-83`. Mainnet and testnet
+are released independently, and the publish workflow strips the
+network prefix from the image tag.
+
+### What's inside
+
+Every build also gets a tag that names both bundled versions,
+`:v<daemon>-tui<tui>`, such as `:v5.5.1.0-83-tui1.13.1` or
+`:v5.5.1.11-1-tui1.13.1-testnet`. It has the same digest as
+`:latest`, so the registry's tag list tells you what `:latest`
+contains before you pull.
+
+After pulling, the versions are in the image labels:
+
+```sh
+docker inspect ghcr.io/gridcat/grc-wallet:latest \
+  --format '{{index .Config.Labels "club.gridcoin.daemon.version"}} {{index .Config.Labels "club.gridcoin.tui.version"}}'
+```
+
+and in the first lines of the container log:
+
+```
+[INIT] gridcoinresearchd 5.5.1.0-83~ubuntu24.04.1, gridcoinresearch-tui 1.13.1
+```
 
 ## Layout
 
@@ -29,12 +51,13 @@ mainnet/entrypoint.sh        — config init + exec gridcoinresearchd
 testnet/Dockerfile           — Ubuntu 24.04 + ppa:gridcoin/gridcoin-testnet
 testnet/entrypoint.sh        — config init + exec gridcointestnetd -testnet
 .github/workflows/publish.yml — build + push to both registries + chain stamp
+.github/workflows/check-daemon.yml — daily PPA check, auto-release + re-publish
 ```
 
 Mainnet and testnet are split into sibling directories so each can pin
-its own daemon version without dragging the other along. Both
-Dockerfiles use a `releases/latest` cache-buster on the TUI fetch, so
-Docker invalidates the layer when a new TUI release ships.
+its own daemon version without dragging the other along. The TUI
+version comes in as the `TUI_VERSION` build-arg, so a new TUI release
+invalidates only that layer.
 
 ## Runtime contract
 
@@ -64,6 +87,10 @@ in the foreground. Gridcoin keeps one conf per network: mainnet's is
 `gridcoinresearch.conf` at the data dir root, testnet's is
 `testnet/gridcoinresearch.conf`.
 
+The bundled TUI keeps its settings in `.config/gridcoinresearch-tui/`
+inside the same data dir, so they survive pulling a new image or
+recreating the container.
+
 ## CI
 
 GitHub Actions (`.github/workflows/publish.yml`) builds on:
@@ -77,11 +104,29 @@ GitHub Actions (`.github/workflows/publish.yml`) builds on:
   publishes `:<vX.Y.Z>-testnet` and `:latest-testnet`, stamps the
   digest. README sync is skipped (mainnet covers it).
 - **Weekly schedule** (Sundays 03:00 UTC) → republishes both `:latest`
-  flavours so a new TUI release lands on the next run. No stamp, no
-  README re-sync. Only tagged releases are anchored.
-- **Manual** (`workflow_dispatch`) → same shape as the weekly run.
-  Use the Run workflow button when a new TUI release lands and you
-  don't want to wait for Sunday.
+  flavours (base-image updates). No stamp, no README re-sync. Only
+  tagged releases are anchored.
+- **Manual / dispatch** (`workflow_dispatch`) → on a branch, same as
+  the weekly run; on a `mainnet-v*` / `testnet-v*` tag, same as that
+  tag push. Every `gridcoinresearch-tui` release dispatches it on
+  `master`, so a new TUI lands in `:latest` within minutes.
+
+Every run bundles the latest `gridcoinresearch-tui` release and also
+publishes the `:v<daemon>-tui<tui>` tag.
+
+`.github/workflows/check-daemon.yml` checks both PPAs once a day
+(04:17 UTC). To check right away, run "Release new daemon versions"
+from the Actions tab. When a PPA has a newer daemon, the workflow
+bumps `GRC_DAEMON_VERSION` in that network's Dockerfile, commits to
+`master`, tags `<network>-v<version>`, and dispatches the publish
+workflow on that tag. If the PPA rebuilds the same version and only
+the `~ubuntu…` suffix changes, the tag gets `-r2`, then `-r3`, and so
+on.
+
+The check also looks at recent release tags and dispatches any whose
+image is missing from either registry. A build moves `:latest` only
+when its network directory still matches `master`, so a slow run
+can't roll `:latest` back.
 
 GHCR auth uses the workflow's `GITHUB_TOKEN` automatically. Docker
 Hub auth needs two repository secrets:
@@ -92,23 +137,24 @@ Hub auth needs two repository secrets:
 
 ## Bumping daemon versions
 
-Edit the `apt-get install` pin in the relevant Dockerfile, commit, and
-tag with the network prefix:
+`check-daemon.yml` releases new PPA versions on its own (see CI). To
+release by hand, for example to pin an older daemon, edit `ARG GRC_DAEMON_VERSION` in
+the relevant Dockerfile, commit, and tag with the network prefix:
 
 ```sh
-# mainnet bump
-git tag mainnet-v0.2.0
-git push origin mainnet-v0.2.0
-
-# testnet bump (independent timeline)
-git tag testnet-v0.5.3
-git push origin testnet-v0.5.3
+make release-mainnet VERSION=5.5.1.0-83
+make release-testnet VERSION=5.5.1.11-1
 ```
 
-The matching job rebuilds and publishes that flavour only. The
-network prefix is stripped before publishing — the image tag is
-`:v0.2.0` (mainnet) or `:v0.5.3-testnet`, never with `mainnet-` /
-`testnet-` in the image tag itself.
+The matching job rebuilds and publishes that flavour only. The image
+tag drops the network prefix: `:v5.5.1.0-83` (mainnet) or
+`:v5.5.1.11-1-testnet`.
+
+Local builds need the TUI version as a build-arg:
+
+```sh
+docker build --build-arg TUI_VERSION=v1.13.1 ./mainnet
+```
 
 ## Credits
 

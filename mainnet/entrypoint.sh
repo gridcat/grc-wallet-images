@@ -76,6 +76,7 @@ if [[ -z $(grep "addnode" $GRC_DATADIR/gridcoinresearch.conf) ]] ; then
 fi
 
 echo "[INIT] Init completed"
+echo "[INIT] gridcoinresearchd $(dpkg-query -W -f='${Version}' gridcoinresearchd), $(/bin/gridcoinresearch-tui --version)"
 echo "[INIT] Starting gridcoin daemon"
 
 exec /usr/bin/gridcoinresearchd
