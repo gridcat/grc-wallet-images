@@ -27,7 +27,7 @@ timelines — the source git tags carry a network prefix (`mainnet-v*` /
 mainnet/Dockerfile           — Ubuntu 24.04 + ppa:gridcoin/gridcoin-stable
 mainnet/entrypoint.sh        — config init + exec gridcoinresearchd
 testnet/Dockerfile           — Ubuntu 24.04 + ppa:gridcoin/gridcoin-testnet
-testnet/entrypoint.sh        — config init + exec gridcointestnetd
+testnet/entrypoint.sh        — config init + exec gridcointestnetd -testnet
 .github/workflows/publish.yml — build + push to both registries + chain stamp
 ```
 
@@ -60,7 +60,9 @@ On first start the entrypoint generates a random `rpcuser` /
 with `rpcport`, `rpcallowip=*`, and a bootstrap addnodes list into
 `gridcoinresearch.conf` if those keys aren't already there (so an
 operator-supplied conf survives untouched), then `exec`s the daemon
-in the foreground.
+in the foreground. Gridcoin keeps one conf per network: mainnet's is
+`gridcoinresearch.conf` at the data dir root, testnet's is
+`testnet/gridcoinresearch.conf`.
 
 ## CI
 

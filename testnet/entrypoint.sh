@@ -1,12 +1,17 @@
 #!/bin/bash
 
 # Testnet wallet entrypoint. Same shape as the mainnet entrypoint —
-# only the rpcport (47813 vs 47812) and the daemon binary differ.
+# only the rpcport (47813 vs 47812), the daemon binary and the conf
+# location differ.
+#
+# gridcointestnetd still defaults to mainnet, so it needs -testnet, and
+# Gridcoin keeps split config files: a testnet node reads its conf from
+# the testnet/ subfolder, not the datadir root.
 
 echo "[INIT] Gridcoin Daemon configuration check (testnet)"
 
 unset GRC_DATADIR
-export GRC_DATADIR=/root/.GridcoinResearch/
+export GRC_DATADIR=/root/.GridcoinResearch/testnet
 echo "[INIT]   GRC_DATADIR=$GRC_DATADIR"
 
 if [[ ! -d "$GRC_DATADIR" ]] ; then
@@ -69,4 +74,4 @@ fi
 echo "[INIT] Init completed"
 echo "[INIT] Starting gridcoin daemon"
 
-exec /usr/bin/gridcointestnetd
+exec /usr/bin/gridcointestnetd -testnet
