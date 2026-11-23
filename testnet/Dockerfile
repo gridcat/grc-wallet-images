@@ -5,7 +5,7 @@ ENV TZ=Europe/Berlin
 # gridcointestnetd from the official testnet PPA. Pin is explicit so
 # a bad upstream release can't silently break the next image build;
 # bump the version when a newer release is verified.
-ARG GRC_DAEMON_VERSION=5.5.2.0-2~noble1
+ARG GRC_DAEMON_VERSION=5.5.3.0-1~noble2
 RUN apt-get update -qq \
     &&  apt-get upgrade -y -qq \
     &&  DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y -qq \
